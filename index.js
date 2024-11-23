@@ -10,6 +10,7 @@ document.getElementById("convert").addEventListener("click", async () => {
 
     const txtFile = txtFileInput.files[0];
     const coverFile = coverFileInput.files.length ? coverFileInput.files[0] : null;
+    const coverExtension = coverFile.type.split("/")[1];  // Get file extension (e.g., 'jpg')
     const fileName = txtFile.name.replace(/\.txt$/, ".epub"); // Use file name for EPUB
     const txtContent = await txtFile.text();
 
@@ -65,37 +66,44 @@ document.getElementById("convert").addEventListener("click", async () => {
       </container>
     `.trim());
 
+    const navPoints = chapters.map(
+        (chapter, index) => `
+      <navPoint id="navPoint-${index + 1}" playOrder="${index + 1}">
+        <navLabel>
+          <text>${chapter.title}</text>
+        </navLabel>
+        <content src="chapter${index + 1}.xhtml" />
+      </navPoint>
+    `).join("\n");
+
+    zip.folder("OEBPS").file("toc.ncx", `
+    <?xml version="1.0" encoding="UTF-8"?>
+    <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+      <head>
+        <meta name="dtb:uid" content="book-id" />
+        <meta name="dtb:depth" content="1" />
+        <meta name="dtb:totalPageCount" content="0" />
+        <meta name="dtb:maxPageNumber" content="0" />
+      </head>
+      <docTitle>
+        <text>${txtFile.name.replace(/\.txt$/, "")}</text>
+      </docTitle>
+      <docAuthor>
+        <text>${author}</text>
+      </docAuthor>
+      <navMap>
+        ${navPoints}
+      </navMap>
+    </ncx>
+    `.trim());
+
     // Add OEBPS/content.opf
     const manifest = chapters.map((_, index) => `
       <item id="chap${index + 1}" href="chapter${index + 1}.xhtml" media-type="application/xhtml+xml"/>
     `).join("\n");
-    const spine = chapters.map((_, index) => `
+    let spine = chapters.map((_, index) => `
       <itemref idref="chap${index + 1}"/>
     `).join("\n");
-
-    // Add cover image to manifest if provided
-    const coverManifest = coverFile ? `<item id="cover" href="cover.${coverFile.type.split("/")[1]}" media-type="${coverFile.type}"/>` : "";
-    const metaCover = coverFile ? `<meta name="cover" content="cover"/>` : "";
-
-    zip.folder("OEBPS").file("content.opf", `
-      <?xml version="1.0" encoding="UTF-8"?>
-      <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id" version="3.0">
-        <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-          <dc:title>${txtFile.name.replace(/\.txt$/, "")}</dc:title>
-          <dc:language>zh</dc:language>
-          <dc:creator>${author}</dc:creator>
-          <dc:identifier id="book-id">123456789</dc:identifier>
-          ${metaCover}
-        </metadata>
-        <manifest>
-          ${manifest}
-          ${coverManifest}
-        </manifest>
-        <spine>
-          ${spine}
-        </spine>
-      </package>
-    `.trim());
 
     // Add chapters as separate XHTML files with inline CSS for paragraph indentation
     const css = `
@@ -118,12 +126,70 @@ document.getElementById("convert").addEventListener("click", async () => {
       `.trim());
     });
 
+    const coverFilename = `cover.${coverExtension}`;
+    let coverManifest = coverFile ? `<item id="cover" href="${coverFilename}" media-type="${coverFile.type}"/>` : "";
     // Add cover image if provided
     if (coverFile) {
         const coverData = await coverFile.arrayBuffer();
-        const coverExtension = coverFile.type.split("/")[1]; // Get file extension (e.g., 'jpg')
-        zip.folder("OEBPS").file(`cover.${coverExtension}`, coverData);
+
+        zip.folder("OEBPS").file(coverFilename, coverData);
+
+        // 添加封面页面
+        zip.folder("OEBPS").file(
+            "cover.xhtml",
+            `
+          <?xml version="1.0" encoding="UTF-8"?>
+          <html xmlns="http://www.w3.org/1999/xhtml" lang="zh">
+            <head><title>Cover</title></head>
+            <body>
+              <div style="text-align: center;">
+                <img src="${coverFilename}" alt="Cover" />
+              </div>
+            </body>
+          </html>
+          `.trim()
+        );
+
+        // 在 manifest 中声明封面
+        coverManifest = `
+          ${coverManifest}
+          <item id="coverPage" href="cover.xhtml" media-type="application/xhtml+xml"/>
+        `;
+
+        // 在 spine 中添加封面页面
+        spine = `
+          <itemref idref="coverPage" linear="yes"/>
+          ${spine}
+        `;
     }
+
+    // Add cover image to manifest if provided
+    const metaCover = coverFile ? `<meta name="cover" content="cover"/>` : "";
+    const tocManifest = `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`;
+
+    zip.folder("OEBPS").file("content.opf", `
+      <?xml version="1.0" encoding="UTF-8"?>
+      <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id" version="2.0">
+        <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+          <dc:title>${txtFile.name.replace(/\.txt$/, "")}</dc:title>
+          <dc:language>zh</dc:language>
+          <dc:creator>${author}</dc:creator>
+          <dc:identifier id="book-id">123456789</dc:identifier>
+          ${metaCover}
+        </metadata>
+        <manifest>
+          ${manifest}
+          ${coverManifest}
+          ${tocManifest}
+        </manifest>
+        <spine toc="ncx">
+          ${spine}
+        </spine>
+        <guide>
+            <reference type="cover" title="Cover" href="cover.xhtml" />
+        </guide>
+      </package>
+    `.trim());
 
     // Generate EPUB
     const blob = await zip.generateAsync({ type: "blob" });
