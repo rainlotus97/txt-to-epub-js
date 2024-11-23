@@ -53,7 +53,7 @@ document.getElementById("convert").addEventListener("click", async () => {
     const zip = new JSZip();
 
     // Add mimetype file
-    zip.file("mimetype", "application/epub+zip");
+    zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
 
     // Add META-INF/container.xml
     zip.folder("META-INF").file("container.xml", `
@@ -68,10 +68,10 @@ document.getElementById("convert").addEventListener("click", async () => {
     // Add OEBPS/content.opf
     const manifest = chapters.map((_, index) => `
       <item id="chap${index + 1}" href="chapter${index + 1}.xhtml" media-type="application/xhtml+xml"/>
-    `).join("");
+    `).join("\n");
     const spine = chapters.map((_, index) => `
       <itemref idref="chap${index + 1}"/>
-    `).join("");
+    `).join("\n");
 
     // Add cover image to manifest if provided
     const coverManifest = coverFile ? `<item id="cover" href="cover.${coverFile.type.split("/")[1]}" media-type="${coverFile.type}"/>` : "";
