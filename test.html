@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.jsdelivr.net/npm/@shelacek/whatwg-encoding/lib/whatwg-encoding.js"></script>
+  <title>替代编码检测</title>
+</head>
+<body>
+  <h1>TXT 文件解析工具</h1>
+  <input type="file" id="fileInput" accept=".txt" />
+  <button id="processFile">解析文件</button>
+  <pre id="output"></pre>
+
+  <script type="module">
+    document.getElementById('processFile').addEventListener('click', async () => {
+      const fileInput = document.getElementById('fileInput');
+      const output = document.getElementById('output');
+
+      if (!fileInput.files.length) {
+        alert('请先选择一个 TXT 文件！');
+        return;
+      }
+
+      const file = fileInput.files[0];
+
+      // Step 1: 读取文件内容
+      const fileContent = await readFileAsArrayBuffer(file);
+
+      // Step 2: 检测文件编码（简单假设 UTF-8 或 GBK）
+      const detectedEncoding = detectEncoding(fileContent) || 'utf-8';
+      console.log(`检测到的编码格式: ${detectedEncoding}`);
+
+      // Step 3: 解码文件内容
+      const decoder = new TextDecoder(detectedEncoding); // 使用 TextDecoder
+      const decodedContent = decoder.decode(fileContent);
+
+      // Step 4: 清理内容并展示
+      const cleanedContent = decodedContent.trim().replace(/\r\n/g, '\n');
+      output.textContent = cleanedContent;
+    });
+
+    // 使用 ArrayBuffer 检测编码
+    function detectEncoding(buffer) {
+      const firstBytes = new Uint8Array(buffer.slice(0, 4));
+      if (firstBytes[0] === 0xff && firstBytes[1] === 0xfe) return 'utf-16le'; // UTF-16 LE
+      if (firstBytes[0] === 0xfe && firstBytes[1] === 0xff) return 'utf-16be'; // UTF-16 BE
+      if (firstBytes[0] === 0xef && firstBytes[1] === 0xbb && firstBytes[2] === 0xbf) return 'utf-8'; // UTF-8 BOM
+      // 如果没有 BOM，可假定 UTF-8 或 GBK（手动调整）
+      return 'gbk'; // 假定 GBK 为备选编码
+    }
+
+    // 读取文件为 ArrayBuffer
+    function readFileAsArrayBuffer(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+      });
+    }
+  </script>
+</body>
+</html>

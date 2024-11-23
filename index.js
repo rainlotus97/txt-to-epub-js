@@ -10,9 +10,18 @@ document.getElementById("convert").addEventListener("click", async () => {
 
     const txtFile = txtFileInput.files[0];
     const coverFile = coverFileInput.files.length ? coverFileInput.files[0] : null;
-    const coverExtension = coverFile.type.split("/")[1];  // Get file extension (e.g., 'jpg')
-    const fileName = txtFile.name.replace(/\.txt$/, ".epub"); // Use file name for EPUB
-    const txtContent = await txtFile.text();
+    const coverExtension = coverFile ? coverFile.type.split("/")[1] : '';  // Get file extension (e.g., 'jpg')
+    const bookName = extractBookTitle(txtFile.name);
+    const fileName = bookName + ".epub"; // Use file name for EPUB
+    // Step 1: 读取文件内容
+    const fileContent = await readFileAsArrayBuffer(txtFile);
+
+    // Step 2: 检测文件编码（简单假设 UTF-8 或 GBK）
+    const detectedEncoding = detectEncoding(fileContent) || 'utf-8';
+
+    // Step 3: 解码文件内容
+    const decoder = new TextDecoder(detectedEncoding); // 使用 TextDecoder
+    const txtContent = decoder.decode(fileContent).trim();
 
     // Extract author if declared as "作者: xxx" or "作者：xxx"
     const authorMatch = txtContent.match(/作者[:：]\s*(.+)/);
@@ -67,14 +76,28 @@ document.getElementById("convert").addEventListener("click", async () => {
     `.trim());
 
     const navPoints = chapters.map(
-        (chapter, index) => `
-      <navPoint id="navPoint-${index + 1}" playOrder="${index + 1}">
-        <navLabel>
-          <text>${chapter.title}</text>
-        </navLabel>
-        <content src="chapter${index + 1}.xhtml" />
-      </navPoint>
-    `).join("\n");
+        (chapter, index) => {
+            const id = `chapter${index + 1}`;
+            const playOrder = index + 2; // 封页的 playOrder 为 1
+            return (`
+            <navPoint id="navPoint-${id}" playOrder="${playOrder}">
+              <navLabel>
+                <text>${chapter.title}</text>
+              </navLabel>
+              <content src="${id}.xhtml" />
+            </navPoint>
+          `).trim();
+        }).join("\n");
+
+    // 封页声明
+    const coverNavPoint = coverFile ? `
+    <navPoint id="cover" playOrder="1">
+      <navLabel>
+        <text>封面</text>
+      </navLabel>
+      <content src="cover.xhtml" />
+    </navPoint>
+  `: "";
 
     zip.folder("OEBPS").file("toc.ncx", `
     <?xml version="1.0" encoding="UTF-8"?>
@@ -86,12 +109,13 @@ document.getElementById("convert").addEventListener("click", async () => {
         <meta name="dtb:maxPageNumber" content="0" />
       </head>
       <docTitle>
-        <text>${txtFile.name.replace(/\.txt$/, "")}</text>
+        <text>${bookName}</text>
       </docTitle>
       <docAuthor>
         <text>${author}</text>
       </docAuthor>
       <navMap>
+        ${coverNavPoint}
         ${navPoints}
       </navMap>
     </ncx>
@@ -116,6 +140,7 @@ document.getElementById("convert").addEventListener("click", async () => {
     chapters.forEach((chapter, index) => {
         zip.folder("OEBPS").file(`chapter${index + 1}.xhtml`, `
         <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
         <html xmlns="http://www.w3.org/1999/xhtml" lang="zh">
           <head>
             <title>${chapter.title}</title>
@@ -138,15 +163,21 @@ document.getElementById("convert").addEventListener("click", async () => {
         zip.folder("OEBPS").file(
             "cover.xhtml",
             `
-          <?xml version="1.0" encoding="UTF-8"?>
-          <html xmlns="http://www.w3.org/1999/xhtml" lang="zh">
-            <head><title>Cover</title></head>
-            <body>
-              <div style="text-align: center;">
-                <img src="${coverFilename}" alt="Cover" />
-              </div>
-            </body>
-          </html>
+          <?xml version='1.0' encoding='utf-8'?>
+            <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+                <head>
+                    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+                    <meta name="calibre:cover" content="true"/>
+                    <title>Cover</title>
+                </head>
+                <body>
+                    <div>
+                        <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="100%" height="100%" viewBox="0 0 600 800" preserveAspectRatio="none">
+                            <image width="600" height="800" xlink:href="${coverFilename}"/>
+                        </svg>
+                    </div>
+                </body>
+            </html>
           `.trim()
         );
 
@@ -164,22 +195,22 @@ document.getElementById("convert").addEventListener("click", async () => {
     }
 
     // Add cover image to manifest if provided
-    const metaCover = coverFile ? `<meta name="cover" content="cover"/>` : "";
+    const metaCover = coverFile ? `<meta name="cover" content="cover"></meta>` : "";
     const tocManifest = `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`;
 
     zip.folder("OEBPS").file("content.opf", `
       <?xml version="1.0" encoding="UTF-8"?>
       <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id" version="2.0">
         <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-          <dc:title>${txtFile.name.replace(/\.txt$/, "")}</dc:title>
+          <dc:title>${bookName}</dc:title>
           <dc:language>zh</dc:language>
           <dc:creator>${author}</dc:creator>
-          <dc:identifier id="book-id">123456789</dc:identifier>
+          <dc:identifier id="book-id">${new Date().getTime()}</dc:identifier>
           ${metaCover}
         </metadata>
         <manifest>
-          ${manifest}
           ${coverManifest}
+          ${manifest}
           ${tocManifest}
         </manifest>
         <spine toc="ncx">
@@ -200,3 +231,33 @@ document.getElementById("convert").addEventListener("click", async () => {
     a.textContent = "Download EPUB";
     document.body.appendChild(a);
 });
+// 使用 ArrayBuffer 检测编码
+function detectEncoding(buffer) {
+    // 尝试 UTF-8 解码
+    try {
+        const decoded = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+        console.log("检测结果: UTF-8");
+        return 'utf-8';
+    } catch (e) {
+        console.log("UTF-8 解码失败，可能是 GBK 或其他编码");
+    }
+
+    // 如果 UTF-8 解码失败，假定 GBK（更复杂的检测需要其他工具）
+    return 'gbk';
+}
+
+
+// 读取文件为 ArrayBuffer
+function readFileAsArrayBuffer(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+function extractBookTitle(filename) {
+    const match = filename.match(/《([^》]+)》/);
+    return match ? match[1] : filename; // 提取书名号中的内容
+}
