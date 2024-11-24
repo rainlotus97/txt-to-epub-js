@@ -10,6 +10,10 @@ document.getElementById("convert").addEventListener("click", async () => {
 
     const txtFile = txtFileInput.files[0];
     const coverFile = coverFileInput.files.length ? coverFileInput.files[0] : null;
+    let dimensions = { width: 0, height: 0 }
+    if (coverFile) {
+        dimensions = await getImageDimensionsFromFile(coverFile);
+    }
     const coverExtension = coverFile ? coverFile.type.split("/")[1] : '';  // Get file extension (e.g., 'jpg')
     const bookName = extractBookTitle(txtFile.name);
     const fileName = bookName + ".epub"; // Use file name for EPUB
@@ -70,7 +74,7 @@ document.getElementById("convert").addEventListener("click", async () => {
       <?xml version="1.0" encoding="UTF-8"?>
       <container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
         <rootfiles>
-          <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+          <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
         </rootfiles>
       </container>
     `.trim());
@@ -84,22 +88,22 @@ document.getElementById("convert").addEventListener("click", async () => {
               <navLabel>
                 <text>${chapter.title}</text>
               </navLabel>
-              <content src="${id}.xhtml" />
+              <content src="./OEBPS/${id}.xhtml" />
             </navPoint>
           `).trim();
         }).join("\n");
 
     // 封页声明
     const coverNavPoint = coverFile ? `
-    <navPoint id="cover" playOrder="1">
+    <navPoint id="titlepage" playOrder="1">
       <navLabel>
         <text>封面</text>
       </navLabel>
-      <content src="cover.xhtml" />
+      <content src="titlepage.xhtml" />
     </navPoint>
   `: "";
 
-    zip.folder("OEBPS").file("toc.ncx", `
+    zip.folder("").file("toc.ncx", `
     <?xml version="1.0" encoding="UTF-8"?>
     <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
       <head>
@@ -123,19 +127,16 @@ document.getElementById("convert").addEventListener("click", async () => {
 
     // Add OEBPS/content.opf
     const manifest = chapters.map((_, index) => `
-      <item id="chap${index + 1}" href="chapter${index + 1}.xhtml" media-type="application/xhtml+xml"/>
-    `).join("\n");
+        <item id="chap${index + 1}" href="OEBPS/chapter${index + 1}.xhtml" media-type="application/xhtml+xml"/>
+    `).join("\n").trim();
     let spine = chapters.map((_, index) => `
-      <itemref idref="chap${index + 1}"/>
-    `).join("\n");
+        <itemref idref="chap${index + 1}"/>`
+    ).join("\n").trim();
 
     // Add chapters as separate XHTML files with inline CSS for paragraph indentation
-    const css = `
-      body { font-family: Arial, sans-serif; line-height: 1.6; }
-      p { text-indent: 2em; margin: 0; }
-    `;
+    const css = `body { font-family: Arial, sans-serif; line-height: 1.6; }p { text-indent: 2em; margin: 0; }`;
 
-    zip.folder("OEBPS").file("style.css", css);
+    zip.folder("").file("style.css", css);
 
     chapters.forEach((chapter, index) => {
         zip.folder("OEBPS").file(`chapter${index + 1}.xhtml`, `
@@ -144,7 +145,7 @@ document.getElementById("convert").addEventListener("click", async () => {
         <html xmlns="http://www.w3.org/1999/xhtml" lang="zh">
           <head>
             <title>${chapter.title}</title>
-            <link rel="stylesheet" type="text/css" href="style.css"/>
+            <link rel="stylesheet" type="text/css" href="../style.css"/>
           </head>
           <body>${chapter.content}</body>
         </html>
@@ -152,16 +153,16 @@ document.getElementById("convert").addEventListener("click", async () => {
     });
 
     const coverFilename = `cover.${coverExtension}`;
-    let coverManifest = coverFile ? `<item id="cover" href="${coverFilename}" media-type="${coverFile.type}"/>` : "";
+    let coverManifest = coverFile ? `<item id="coverPage" href="${coverFilename}" media-type="${coverFile.type}"/>` : "";
     // Add cover image if provided
     if (coverFile) {
         const coverData = await coverFile.arrayBuffer();
 
-        zip.folder("OEBPS").file(coverFilename, coverData);
+        zip.folder("").file(coverFilename, coverData);
 
         // 添加封面页面
-        zip.folder("OEBPS").file(
-            "cover.xhtml",
+        zip.folder("").file(
+            "titlepage.xhtml",
             `
           <?xml version='1.0' encoding='utf-8'?>
             <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
@@ -172,8 +173,8 @@ document.getElementById("convert").addEventListener("click", async () => {
                 </head>
                 <body>
                     <div>
-                        <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="100%" height="100%" viewBox="0 0 600 800" preserveAspectRatio="none">
-                            <image width="600" height="800" xlink:href="${coverFilename}"/>
+                        <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="100%" height="100%" viewBox="0 0 ${dimensions.width} ${dimensions.height}" preserveAspectRatio="none">
+                            <image width="${dimensions.width}" height="${dimensions.height}" xlink:href="${coverFilename}"/>
                         </svg>
                     </div>
                 </body>
@@ -182,23 +183,19 @@ document.getElementById("convert").addEventListener("click", async () => {
         );
 
         // 在 manifest 中声明封面
-        coverManifest = `
-          ${coverManifest}
-          <item id="coverPage" href="cover.xhtml" media-type="application/xhtml+xml"/>
-        `;
+        coverManifest = `${coverManifest}
+        <item id="titlepage" href="titlepage.xhtml" media-type="application/xhtml+xml"/>`;
 
         // 在 spine 中添加封面页面
-        spine = `
-          <itemref idref="coverPage" linear="yes"/>
-          ${spine}
-        `;
+        spine = `<itemref idref="titlepage" />
+        ${spine}`;
     }
 
     // Add cover image to manifest if provided
-    const metaCover = coverFile ? `<meta name="cover" content="cover"></meta>` : "";
+    const metaCover = coverFile ? `<meta name="cover" content="coverPage"></meta>` : "";
     const tocManifest = `<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`;
 
-    zip.folder("OEBPS").file("content.opf", `
+    zip.folder("").file("content.opf", `
       <?xml version="1.0" encoding="UTF-8"?>
       <package xmlns="http://www.idpf.org/2007/opf" unique-identifier="book-id" version="2.0">
         <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -217,7 +214,7 @@ document.getElementById("convert").addEventListener("click", async () => {
           ${spine}
         </spine>
         <guide>
-            <reference type="cover" title="Cover" href="cover.xhtml" />
+            <reference type="cover" title="Cover" href="titlepage.xhtml" />
         </guide>
       </package>
     `.trim());
@@ -259,5 +256,26 @@ function readFileAsArrayBuffer(file) {
 
 function extractBookTitle(filename) {
     const match = filename.match(/《([^》]+)》/);
-    return match ? match[1] : filename; // 提取书名号中的内容
+    return match ? match[1] : filename.split('.')[0]; // 提取书名号中的内容
+}
+
+function getImageDimensionsFromFile(file) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file); // 创建临时 URL
+
+        img.onload = () => {
+            const width = img.naturalWidth;
+            const height = img.naturalHeight;
+            URL.revokeObjectURL(url); // 释放资源
+            resolve({ width, height });
+        };
+
+        img.onerror = (err) => {
+            URL.revokeObjectURL(url);
+            reject(new Error("无法加载图片"));
+        };
+
+        img.src = url; // 加载图片
+    });
 }
