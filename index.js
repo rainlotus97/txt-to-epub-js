@@ -32,7 +32,7 @@ document.getElementById("convert").addEventListener("click", async () => {
     const author = authorMatch ? authorMatch[1].trim() : (authorInput.value || "Unknown");
 
     // Regular expression to detect chapters and volumes
-    const chapterRegex = /(第[一二三四五六七八九十0-9]+[章卷][^\n]*|楔子|引言|序章[^\n]*)/g;
+    const chapterRegex = /(?:^|\n)(第[一二三四五六七八九十0-9]+[章卷][^\n]*|楔子|引言|序章[^\n]*)/g;
 
     const matches = txtContent.split(chapterRegex);
     const chapters = [];
